@@ -1,33 +1,17 @@
 {
-    "manifest_version": 3,
-    "name": "Handsign local meeting bridge",
-    "version": "0.1.0",
-    "description": "Local-only bridge between Handsign and meeting tabs.",
-    "permissions": [
-      "storage",
-      "tabs"
-    ],
-    "host_permissions": [
-      "http://localhost:3000/*",
-      "http://127.0.0.1:3000/*",
-      "https://meet.google.com/*",
-      "https://*.zoom.us/*"
-    ],
-    "background": {
-      "service_worker": "background.js"
-    },
-    "content_scripts": [
-      {
-        "matches": [
-          "http://localhost:3000/*",
-          "http://127.0.0.1:3000/*",
-          "https://meet.google.com/*",
-          "https://*.zoom.us/*"
-        ],
-        "js": [
-          "content.js"
-        ],
-        "run_at": "document_idle"
-      }
-    ]
-  }
+  "manifest_version": 3,
+  "minimum_chrome_version": "111",
+  "name": "Handsign meeting camera",
+  "version": "0.2.0",
+  "description": "Local hand-sign controlled background replacement for Google Meet.",
+  "permissions": ["storage"],
+  "background": { "service_worker": "background.js" },
+  "content_security_policy": { "extension_pages": "script-src 'self' 'wasm-unsafe-eval'; object-src 'self'" },
+  "content_scripts": [
+    { "matches": ["https://meet.google.com/*"], "js": ["meet.js"], "run_at": "document_start", "world": "MAIN" },
+    { "matches": ["http://localhost:3000/*", "http://127.0.0.1:3000/*", "https://handsign-kappa.vercel.app/*", "https://meet.google.com/*"], "js": ["content.js"], "run_at": "document_idle" }
+  ],
+  "web_accessible_resources": [
+    { "resources": ["recognizer.html"], "matches": ["https://meet.google.com/*"] }
+  ]
+}

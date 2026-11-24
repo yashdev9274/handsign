@@ -2,3 +2,9 @@ node_modules
 .next
 dist
 .DS_Store
+extension/vendor/
+extension/meet.js
+extension/recognizer.js
+*.tsbuildinfo
+test-results/
+playwright-report/

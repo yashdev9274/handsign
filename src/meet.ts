@@ -1,0 +1,117 @@
+import { processCamera, type CameraPipeline } from "./media-pipeline";
+import { GestureGate } from "./gestures";
+
+(() => {
+  if (location.origin !== "https://meet.google.com") return;
+  const native = navigator.mediaDevices.getUserMedia.bind(navigator.mediaDevices);
+  const pipelines = new Set<CameraPipeline>();
+  let current: CameraPipeline | null = null;
+  let armed = false, capturing = false, busy = false, generation = 0;
+  let frame: HTMLIFrameElement | null = null, extensionOrigin = "", recognizerReady = false;
+  let gate = new GestureGate(), lastSent = 0;
+  let status = "Turn your Meet camera on. Reload Meet after installing the extension.";
+  const host = document.createElement("div");
+  const root = host.attachShadow({ mode: "closed" });
+  const style = document.createElement("style");
+  style.textContent = ":host{position:fixed;right:16px;top:64px;z-index:2147483647;width:280px;color:#f4f0e8;font:13px Arial}section{background:#12151ef5;border:1px solid #9b8cff;border-radius:12px;padding:14px;box-shadow:0 8px 32px #0008}button{margin:5px 4px 0 0;padding:8px;border:0;border-radius:6px;cursor:pointer;background:#f3b65c;color:#111}button:disabled{opacity:.4;cursor:default}p{line-height:1.5;margin:10px 0}small{color:#bbb}video{width:100%;max-height:140px;background:#000;border-radius:6px}";
+  const panel = document.createElement("section");
+  const title = document.createElement("strong"); title.textContent = "Handsign · outgoing camera";
+  const text = document.createElement("p"); text.setAttribute("role", "status");
+  const preview = document.createElement("video"); preview.muted = true; preview.autoplay = true; preview.playsInline = true;
+  const capture = document.createElement("button"); capture.textContent = "Capture background (5s)";
+  const arm = document.createElement("button"); arm.textContent = "Arm signs";
+  const test = document.createElement("button"); test.textContent = "Test vanish";
+  const restore = document.createElement("button"); restore.textContent = "Restore / disarm";
+  const note = document.createElement("p"); const small = document.createElement("small");
+  small.textContent = "Step out for capture. Keep camera fixed. Disable Meet background effects. Camera stays on. This replaces the whole image with a still photo, not a privacy control.";
+  note.append(small); panel.append(title, text, preview, capture, arm, test, restore, note); root.append(style, panel);
+  function mount() { if (document.body && !host.isConnected) document.body.append(host); }
+  if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", mount, { once: true }); else mount();
+  function update() {
+    text.textContent = current?.vanished ? "Vanished: sending captured background. Restoring after 3.5s." : status;
+    capture.disabled = !current || current.closed || capturing;
+    arm.disabled = !current?.hasBackground || !recognizerReady || capturing;
+    test.disabled = !current?.hasBackground || capturing;
+    arm.textContent = armed ? "Signs armed" : "Arm signs";
+  }
+  function disarm() { armed = false; generation++; busy = false; gate = new GestureGate(); }
+  capture.onclick = async () => {
+    if (!current || capturing) return;
+    disarm(); capturing = true; current.restore();
+    const target = current;
+    for (let n = 5; n > 0; n--) {
+      status = `Step out of frame. Capturing in ${n}…`; update();
+      await new Promise(r => setTimeout(r, 1000));
+      if (current !== target || target.closed || !capturing) { capturing = false; update(); return; }
+    }
+    try { target.capture(); status = "Background captured. Return to your seat, test vanish, then arm signs."; }
+    catch { status = "Capture failed. Turn your camera off and on, then retry."; }
+    capturing = false; update();
+  };
+  arm.onclick = () => {
+    if (!current?.hasBackground || !recognizerReady) return;
+    disarm(); armed = true; status = "Armed. Hold your saved sign for half a second. Release between signs."; update();
+  };
+  test.onclick = () => { if (current?.vanish()) update(); };
+  restore.onclick = () => {
+    disarm(); capturing = false; pipelines.forEach(p => p.restore());
+    status = "Live video restored. Recognition disarmed."; update();
+  };
+  navigator.mediaDevices.getUserMedia = async constraints => {
+    const stream = await native(constraints);
+    if (!constraints?.video || !stream.getVideoTracks().length ||
+      stream.getVideoTracks()[0].getSettings().displaySurface) return stream;
+    try {
+      const p = await processCamera(stream, () => {
+        pipelines.delete(p);
+        if (current === p) {
+          disarm(); capturing = false; current = null; preview.srcObject = null;
+          status = "Camera stopped or processing failed. Turn Meet camera off and on to reconnect."; update();
+        }
+      });
+      pipelines.add(p); current = p; disarm(); capturing = false;
+      // Preview uses its own managed clone so cleanup does not strand the camera.
+      if (preview.srcObject instanceof MediaStream) preview.srcObject.getTracks().forEach(t => t.stop());
+      preview.srcObject = p.stream;
+      status = "Camera processing active. Capture an empty-room background before arming signs."; update();
+      return p.stream!;
+    } catch (error) {
+      status = "Camera processor failed. Turn the camera off/on to retry. No vanish effect is active."; update();
+      throw error;
+    }
+  };
+  window.addEventListener("message", event => {
+    if (event.source === window && event.origin === location.origin && event.data?.source === "handsign-bridge" && event.data.type === "INIT") {
+      const url = event.data.recognizerUrl;
+      if (frame || typeof url !== "string" || !/^chrome-extension:\/\/[a-p]{32}\/recognizer.html$/.test(url)) return;
+      extensionOrigin = new URL(url).origin;
+      frame = document.createElement("iframe"); frame.src = url; frame.hidden = true;
+      (document.body || document.documentElement).append(frame);
+    }
+    if (!frame || event.source !== frame.contentWindow || event.origin !== extensionOrigin) return;
+    if (event.data?.type === "READY") {
+      recognizerReady = true; status = "Recognition ready. Turn on Meet camera and capture background."; update();
+    } else if (event.data?.type === "ERROR") {
+      disarm(); recognizerReady = false;
+      status = "Recognition unavailable: " + String(event.data.message).slice(0, 180); update();
+    } else if (event.data?.type === "RESULT" && event.data.generation === generation) {
+      busy = false;
+      if (!armed || !current?.hasBackground) return;
+      if (gate.update(typeof event.data.id === "string" ? event.data.id : null, performance.now())) current.vanish();
+      update();
+    }
+  });
+  setInterval(() => {
+    update();
+    if (armed && !current?.hasBackground) { disarm(); status = "Camera changed. Capture the background again."; }
+    if (!armed || !recognizerReady || !current || busy || !frame?.contentWindow || performance.now() - lastSent < 100) return;
+    const p = current, version = generation;
+    busy = true; lastSent = performance.now();
+    void createImageBitmap(p.video, { resizeWidth: 640, resizeHeight: Math.round(640 * p.canvas.height / p.canvas.width) })
+      .then(image => {
+        if (!armed || current !== p || version !== generation) { image.close(); busy = false; return; }
+        frame!.contentWindow!.postMessage({ type: "FRAME", image, generation: version }, extensionOrigin, [image]);
+      }).catch(() => { busy = false; disarm(); status = "Recognition frame failed. Re-arm to retry."; });
+  }, 100);
+  window.addEventListener("pagehide", () => { disarm(); pipelines.forEach(p => p.close()); });
+})();
