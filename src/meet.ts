@@ -40,7 +40,8 @@ import { GestureGate } from "./gestures";
     library.textContent = libraryNames.length ? `Website signs (${libraryNames.length}): ${libraryNames.join(", ")}` : "No website signs synced. Open handsign-kappa.vercel.app in this browser profile.";
     recognition.textContent = recognitionStatus;
   }
-  function disarm() { armed = false; generation++; busy = false; gate = new GestureGate(); }
+  function announceArmed() { window.postMessage({ source: "handsign-meet", type: "ARMED", armed }, location.origin); }
+  function disarm() { armed = false; generation++; busy = false; gate = new GestureGate(); announceArmed(); }
   capture.onclick = async () => {
     if (!current || capturing) return;
     disarm(); capturing = true; current.restore();
@@ -56,7 +57,8 @@ import { GestureGate } from "./gestures";
   };
   arm.onclick = () => {
     if (!current?.hasBackground || !recognizerReady) return;
-    disarm(); armed = true; status = "Armed. Hold your saved sign for half a second. Release between signs."; update();
+    armed = true; generation++; busy = false; gate = new GestureGate(); announceArmed();
+    status = "Armed. Hold your saved sign for half a second. Release between signs."; update();
   };
   test.onclick = () => { if (current?.vanish()) update(); };
   restore.onclick = () => {
@@ -89,6 +91,13 @@ import { GestureGate } from "./gestures";
     }
   };
   window.addEventListener("message", event => {
+    if (event.source === window && event.origin === location.origin && event.data?.source === "handsign-bridge" && event.data.type === "WEBSITE_GESTURE") {
+      if (armed && libraryNames.includes(event.data.gesture) && !current?.vanished) {
+        pipelines.forEach(p => { if (p.hasBackground) p.vanish(); });
+        recognitionStatus = `Website recognized: ${event.data.gesture}`; update();
+      }
+      return;
+    }
     if (event.source === window && event.origin === location.origin && event.data?.source === "handsign-bridge" && event.data.type === "INIT") {
       const url = event.data.recognizerUrl;
       if (frame || typeof url !== "string" || !/^chrome-extension:\/\/[a-p]{32}\/recognizer.html$/.test(url)) return;
@@ -108,7 +117,10 @@ import { GestureGate } from "./gestures";
     } else if (event.data?.type === "RESULT" && event.data.generation === generation) {
       busy = false;
       if (!armed || !current?.hasBackground) return;
-      if (gate.update(typeof event.data.id === "string" ? event.data.id : null, performance.now())) current.vanish();
+      recognitionStatus = event.data.id ? `Meet recognized: ${event.data.name} (${Math.round(event.data.confidence * 100)}%)` : `Meet: ${event.data.hands || 0} hand(s), no saved sign matched. Website detection also enabled.`;
+      if (gate.update(typeof event.data.id === "string" ? event.data.id : null, performance.now()) && !current.vanished) {
+        pipelines.forEach(p => { if (p.hasBackground) p.vanish(); });
+      }
       update();
     }
   });

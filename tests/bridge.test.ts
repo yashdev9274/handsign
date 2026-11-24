@@ -39,6 +39,6 @@ test('background accepts trusted site samples and rejects untrusted or malformed
   assert.equal((response as { ok: boolean }).ok, false);
   listener!({ type: 'SYNC_GESTURES', gestures: [sign] }, { url: 'https://handsign-kappa.vercel.app/' }, value => { response = value; });
   await new Promise(r => setImmediate(r));
-  assert.equal((stored as { gestures: typeof sign[] }).gestures[0].name, 'Vanish');
+  assert.equal((stored as unknown as { gestures: typeof sign[] }).gestures[0].name, 'Vanish');
   assert.equal((response as { ok: boolean }).ok, true);
 });

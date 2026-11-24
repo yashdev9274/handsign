@@ -1,5 +1,5 @@
 (() => {
-  const APP_ORIGINS = ["http://localhost:3000", "http://127.0.0.1:3000", "https://handsign-kappa.vercel.app"];
+  const APP_ORIGINS = ["http://localhost:3000", "http://127.0.0.1:3000", "https://handsign-kappa.vercel.app", "https://handsigns.vercel.app"];
   if (APP_ORIGINS.includes(location.origin)) {
     // Also support already deployed versions that emit their library only once.
     // This isolated content script can read this origin's localStorage, not video.
@@ -26,11 +26,12 @@
     window.addEventListener("message", async event => {
       if (event.source !== window || event.origin !== location.origin || event.data?.source !== "handsign-app") return;
       const type = event.data.type;
-      if (!["HANDSIGN_HELLO", "HANDSIGN_GESTURES_UPDATED"].includes(type)) return;
+      if (!["HANDSIGN_HELLO", "HANDSIGN_GESTURES_UPDATED", "HANDSIGN_GESTURE_DETECTED"].includes(type)) return;
       try {
         const response = await chrome.runtime.sendMessage({
-          type: type === "HANDSIGN_HELLO" ? "HELLO" : "SYNC_GESTURES",
-          gestures: event.data.gestures
+          type: type === "HANDSIGN_HELLO" ? "HELLO" : type === "HANDSIGN_GESTURE_DETECTED" ? "GESTURE_DETECTED" : "SYNC_GESTURES",
+          gestures: event.data.gestures,
+          gesture: event.data.gesture
         });
         window.postMessage({ source: "handsign-extension", type: "HANDSIGN_ACK", ok: response?.ok === true, synced: type === "HANDSIGN_GESTURES_UPDATED" }, location.origin);
       } catch {
@@ -39,6 +40,15 @@
     });
   }
   if (location.origin === "https://meet.google.com") {
+    window.addEventListener("message", event => {
+      if (event.source !== window || event.origin !== location.origin || event.data?.source !== "handsign-meet" || event.data.type !== "ARMED") return;
+      void chrome.runtime.sendMessage({ type: "SET_ARMED", armed: event.data.armed === true }).catch(() => {});
+    });
+    chrome.runtime.onMessage.addListener((message, sender, respond) => {
+      if (sender.id !== chrome.runtime.id || message.type !== "WEBSITE_GESTURE") return;
+      window.postMessage({ source: "handsign-bridge", type: "WEBSITE_GESTURE", gesture: message.gesture }, location.origin);
+      respond({ ok: true });
+    });
     window.postMessage({ source: "handsign-bridge", type: "INIT", recognizerUrl: chrome.runtime.getURL("recognizer.html") }, location.origin);
   }
 })();

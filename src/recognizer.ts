@@ -34,7 +34,7 @@ window.addEventListener("message", event => {
   try {
     const result = landmarker?.detectForVideo(image, performance.now());
     const match = findMatch(result?.landmarks || [], gestures);
-    send({ type: "RESULT", id: match?.gesture.id || null, generation: event.data.generation });
+    send({ type: "RESULT", id: match?.gesture.id || null, name: match?.gesture.name, confidence: match?.confidence || 0, hands: result?.landmarks.length || 0, generation: event.data.generation });
   } catch (error) { send({ type: "ERROR", message: String(error) }); }
   finally { image.close(); }
 });
