@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import { validateGestures, GestureGate } from "../src/gestures";
 
 type Landmark = { x: number; y: number; z?: number };
 
@@ -44,6 +45,9 @@ export default function Home() {
   const vanishTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const [gestures, setGestures] = useState<Gesture[]>([]);
+  const [libraryLoaded, setLibraryLoaded] = useState(false);
+  const [bridgeStatus, setBridgeStatus] = useState("Extension not connected — reload Handsign after enabling it.");
+  const gestureGate = useRef(new GestureGate());
   const [samples, setSamples] = useState<number[][]>([]);
   const [gestureName, setGestureName] = useState("Vanish");
   const [latestLandmarks, setLatestLandmarks] = useState<
@@ -82,10 +86,11 @@ export default function Home() {
         localStorage.getItem(STORAGE_KEY) || "[]"
       );
 
-      setGestures(savedGestures);
+      setGestures(validateGestures(savedGestures));
     } catch {
       setGestures([]);
     }
+    setLibraryLoaded(true);
 
     let cancelled = false;
 
@@ -125,20 +130,24 @@ export default function Home() {
     };
   }, []);
 
-  /*
-   * Lines 71–78:
-   * Send saved gestures to the Chrome extension.
-   */
   useEffect(() => {
-    window.postMessage(
-      {
-        source: "handsign-app",
-        type: "HANDSIGN_GESTURES_UPDATED",
-        gestures
-      },
-      "*"
-    );
-  }, [gestures]);
+    if (!libraryLoaded) return;
+    let acknowledged = false;
+    const sync = () => {
+      if (!acknowledged) window.postMessage({ source: "handsign-app", type: "HANDSIGN_GESTURES_UPDATED", gestures }, location.origin);
+    };
+    const receive = (event: MessageEvent) => {
+      if (event.source !== window || event.origin !== location.origin || event.data?.source !== "handsign-extension" || event.data.type !== "HANDSIGN_ACK") return;
+      if (event.data.synced && event.data.ok) {
+        acknowledged = true;
+        setBridgeStatus(`${gestures.length} saved sign${gestures.length === 1 ? "" : "s"} synced to the Meet extension. Capture your background and arm signs in Meet.`);
+      } else if (!event.data.ok) setBridgeStatus("Extension sync failed. Reload the extension, then reload this page.");
+    };
+    window.addEventListener("message", receive);
+    sync();
+    const timer = setInterval(sync, 1000);
+    return () => { clearInterval(timer); window.removeEventListener("message", receive); };
+  }, [gestures, libraryLoaded]);
 
   /*
    * Detect gestures from the camera feed.
@@ -201,7 +210,7 @@ export default function Home() {
 
               setMatch(nextMatch);
 
-              if (nextMatch && !isVanishing) {
+              if (gestureGate.current.update(nextMatch?.gesture.id || null, timestamp)) {
                 setIsVanishing(true);
 
                 /*
@@ -212,7 +221,7 @@ export default function Home() {
                   {
                     source: "handsign-app",
                     type: "HANDSIGN_GESTURE_DETECTED",
-                    gesture: nextMatch.gesture.name,
+                    gesture: nextMatch!.gesture.name,
                     durationMs: 3500
                   },
                   "*"
@@ -229,6 +238,7 @@ export default function Home() {
             }
           } else {
             setMatch(null);
+            gestureGate.current.update(null, timestamp);
           }
         } catch (error) {
           console.error(
@@ -247,7 +257,7 @@ export default function Home() {
       frameRef.current =
         requestAnimationFrame(processFrame);
     },
-    [gestures, isVanishing]
+    [gestures]
   );
 
   useEffect(() => {
@@ -475,7 +485,7 @@ export default function Home() {
                 <div className="smoke smoke-b" />
                 <div className="smoke smoke-c" />
                 <span className="relative z-10 mono text-xs">
-                  vanished
+                  sign recognized · training preview
                 </span>
               </div>
             )}
@@ -588,6 +598,7 @@ export default function Home() {
             <p className="mt-4 min-h-8 text-[11px] leading-4 text-[var(--muted)]">
               {message}
             </p>
+            <p role="status" className="mt-3 text-[11px] leading-4 text-[var(--gold)]">{bridgeStatus}</p>
           </div>
 
           <div className="rounded-[18px] border border-[var(--line)] bg-[rgba(18,21,30,.84)] p-[22px] shadow-[0_18px_60px_rgba(0,0,0,.16)]">
@@ -648,7 +659,7 @@ export default function Home() {
 
       <footer className="flex justify-between pt-[55px] mono text-[10px] text-[var(--muted)]">
         <span>Built for playful calls.</span>
-        <span>Meet + Zoom adapters coming next.</span>
+        <span>Google Meet requires the Handsign extension. Zoom not supported yet.</span>
       </footer>
     </main>
   );

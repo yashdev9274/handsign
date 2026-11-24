@@ -10,8 +10,9 @@ let gestures = validateGestures([]);
 let landmarker: HandLandmarker | null = null;
 function send(message: object) { parent.postMessage(message, MEET); }
 function report() {
+  send({ type: "LIBRARY", names: gestures.map(g => g.name) });
   if (landmarker && gestures.length) send({ type: "READY" });
-  else if (landmarker) send({ type: "ERROR", message: "No saved signs. Open Handsign and save or sync a gesture." });
+  else if (landmarker) send({ type: "ERROR", message: "No saved signs. Open handsign-kappa.vercel.app in this browser profile to sync your library." });
 }
 chrome.storage.onChanged.addListener(changes => {
   if (changes.gestures) { gestures = validateGestures(changes.gestures.newValue); report(); }
