@@ -1,0 +1,33 @@
+{
+    "manifest_version": 3,
+    "name": "Handsign local meeting bridge",
+    "version": "0.1.0",
+    "description": "Local-only bridge between Handsign and meeting tabs.",
+    "permissions": [
+      "storage",
+      "tabs"
+    ],
+    "host_permissions": [
+      "http://localhost:3000/*",
+      "http://127.0.0.1:3000/*",
+      "https://meet.google.com/*",
+      "https://*.zoom.us/*"
+    ],
+    "background": {
+      "service_worker": "background.js"
+    },
+    "content_scripts": [
+      {
+        "matches": [
+          "http://localhost:3000/*",
+          "http://127.0.0.1:3000/*",
+          "https://meet.google.com/*",
+          "https://*.zoom.us/*"
+        ],
+        "js": [
+          "content.js"
+        ],
+        "run_at": "document_idle"
+      }
+    ]
+  }
